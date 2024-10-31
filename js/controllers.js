@@ -1,0 +1,739 @@
+/* Controllers */
+function FeedListCtrl($scope, $log, feedService){
+  $scope.showByTags = feedService.showByTags()
+  $scope.editable = false;
+  $scope.feeds = feedService.feeds();
+  $scope.tags = feedService.tags();
+  $scope.isLoading = feedService.isLoading();
+  $scope.showRead = 0;
+  $scope.selectedFeed = null;
+  $scope.$watch(feedService.feeds,function(newValue){
+    //console.log('listener');
+    //$scope.feeds = feedService.feeds();
+    $scope.feeds = newValue;
+  });
+  $scope.$watch(feedService.tags,function(newValue){
+    //console.log('listener');
+    $scope.tags = newValue;
+  });
+  $scope.$watch(feedService.isLoading,function(newValue){
+    //console.log('listener');
+    $scope.isLoading = newValue;
+  });
+  $scope.$watch(feedService.showByTags,function(newValue,oldValue){
+    $scope.showByTags = newValue;
+  });
+  $scope.$watch(feedService.selectedFeed,function(newValue,oldValue){
+    $scope.selectedFeed = newValue;
+  });
+  $scope.saveTagView = function(showTags){
+    feedService.saveTagView(showTags,null);
+  };
+
+  /*
+   * let the world know a feed has been CHOSEN
+   * Mightily emit a roar up the scope chain
+   */
+
+  $scope.select = function(feed,showRead){
+    $log.log("selecting " + feed);
+    if( $scope.editable){
+      $scope.$emit('feedEdit',{feed: feed}); 
+    }
+    else{
+      $scope.$emit('feedSelect', {feed: feed,showRead:showRead});
+      feedService.select(feed,showRead);
+      //Mark feed as loading
+    }
+  };
+  $scope.requestNewFeed = function () {
+    $log.info('new feed requested');
+    $scope.$emit('newFeedRequested');
+  }
+
+  /*
+   * get the list of feeds and store it
+   */
+  $scope.refresh = function(callback){
+    feedService.refresh(callback);
+  };
+
+  /*
+   * Get the next unread feed
+   *
+   */
+  $scope.nextUnreadFeed = function(){
+    return feedService.nextUnreadFeed();
+  };
+
+  /*
+   * Set editable
+   */
+  $scope.setEditable = function(){
+    $scope.editable = ! $scope.editable;
+  }
+  $scope.markRead = function(feed){
+    feedService.markFeedRead(feed);
+  }
+
+  /*
+   * Update this feed
+   * TODO move this into the feedService
+   */
+  $scope.update = function(feed){
+    feedService.update(feed);
+  }
+  $scope.showReadItems = function(){
+    //refresh this feed, but display read items
+    $scope.showRead = 1 - $scope.showRead;
+    $scope.select(feedService.selectedFeed(),$scope.showRead);
+  }
+
+  /*
+   * Events
+   */
+
+  /*
+   * We should just get the feeds from the DB.
+   */
+  $scope.$on('refreshFeeds', function(event,args){
+    feedService.refresh();
+  });
+  $scope.$on('updateFeed', function(event,args){
+    $scope.update(args.feed);
+  });
+  
+}
+function CliCtrl($scope, $filter,$timeout,feedService){
+  $scope.reveal = false;
+  $scope.selectedFeed = null;
+  $scope.feeds = feedService.feeds();
+  //$scope.filteredFeeds = $filter('filter')(feedService.feeds(),$scope.filterstring);
+  $scope.filteredFeeds = function(){
+    return $filter('filter')(feedService.feeds(),{'feed_name':$scope.filterstring});
+  };
+  $scope.tags = feedService.tags();
+  $scope.filterstring = null;
+  $scope.$watch(feedService.tags,function(newValue){
+    //console.log('listener');
+    $scope.tags = newValue;
+  });
+  $scope.toggleReveal = function(){
+    $scope.reveal=! $scope.reveal;
+    $scope.filterstring = null;
+    $scope.selectedFeed = null;
+  };
+  $scope.nextResult = function(){
+    feeds = $scope.filteredFeeds();
+    //if no feeds, there can be no selected result
+    if(feeds.length <= 0){
+      $scope.selectedFeed = null;
+      return;
+    }
+    index = feeds.indexOf($scope.selectedFeed);
+    if(index <0){ //selectedFeed is null or not in the list
+      $scope.selectedFeed = feeds[0];
+      return;
+    }
+    if (index < feeds.length -1){
+      $scope.selectedFeed = feeds[index+1];
+    }
+  };
+  $scope.prevResult = function(){
+    feeds = $scope.filteredFeeds();
+    if(feeds.length<=0){
+      $scope.selectedFeed = null;
+      return;
+    }
+    index = feeds.indexOf($scope.selectedFeed);
+    if(index <0){ //selectedFeed is null or not in the list
+      $scope.selectedFeed = feeds[0];
+      return;
+    }
+    if (index > 0){
+      $scope.selectedFeed = feeds[index-1];
+    }
+  };
+  $scope.select = function(feed){
+    feedService.select(feed);
+    $scope.toggleReveal();
+  };
+  $scope.setSelectedFeedIfNull = function(){
+    var filtFeeds = $scope.filteredFeeds();
+    if (! _.contains(filtFeeds,$scope.selectedFeed)){
+      $scope.selectedFeed = filtFeeds[0];
+    }
+  };
+  $scope.processKeys = function($event){
+    $scope.setSelectedFeedIfNull();
+    var enter = 13, tab = 9, esc = 27, up = 38, down = 40, left = 37, right = 39;
+    //cancel other handlers if we've got it
+    //if up/down/escape and we have results
+    //or if enter/tab and we have results and one has been selected
+    if( ([enter,tab,esc,up,down].indexOf($event.keyCode) != -1) &&
+      (([enter,tab].indexOf($event.keyCode) ==-1)|| $scope.selectedFeed)){
+        if($event.stopImmediatePropagation) $event.stopImmediatePropagation();
+        if($event.preventDefault) $event.preventDefault();
+        if($event.stopPropagation) $event.stopPropagation();
+        if($event.cancelBubble) $event.cancelBubble = true;
+    }else{
+      //$scope.toggleReveal();
+      return;
+    }
+    switch($event.keyCode){
+      case up:
+        $scope.prevResult();
+        break;
+      case tab:
+      case down:
+        $scope.nextResult();
+        break;
+      case enter:
+        $event.stopImmediatePropagation();
+        $scope.select($scope.selectedFeed);
+        $event.target.blur();
+        break;
+      case esc:
+        $event.stopImmediatePropagation();
+        //hide the results or empty them
+        $scope.toggleReveal();
+        //deselect the input element so we don't send more input there.
+        $event.target.blur();
+        break;
+    }
+  };
+
+  key('g', function(event,handler){
+    $scope.$apply(function(){$scope.toggleReveal()});
+  });
+
+}
+function EntriesCtrl($scope, $log,feedService){
+  $scope.selectedEntry = null;
+  $scope.isRead = false;
+  $scope.entries = [];
+  $scope.$watch(feedService.entries, function(){
+    $scope.entries = feedService.entries();
+  });
+  $scope.$watch(feedService.selectedFeed, function (){
+    if(feedService.selectedFeed()){
+      $scope.displayFeed(feedService.selectedFeed());
+    }
+  });
+  $scope.$watch(feedService.isEntriesLoading, function(){
+    $scope.isLoading = feedService.isEntriesLoading();
+  });
+  $scope.$watch(feedService.selectedEntry, function(){
+    $scope.selectedEntry=feedService.selectedEntry();
+  });
+
+  
+  /*
+   * select a feed to display entries from
+   */
+  $scope.displayFeed = function(feed,showRead){
+    feedService.getFeedEntries(feed,showRead);
+  };
+  $scope.changeSortOrder = function(newSort){
+    newSort = newSort || feedService.sortOrder() * -1;
+    //console.log("pre saving " + $scope.sortOrder);
+    feedService.saveSort(newSort,function(){$scope.$emit('feedSelect', {feed: feedService.selectedFeed()})});
+    //console.log("post saving " + $scope.sortOrder);
+  };
+
+  $scope.selectFeed = function(entry){
+    console.log('selecting feed');
+    feedService.select(feedService.getFeed(entry.feed_id));
+  }
+
+  $scope.addMoreEntries = function(){
+    var feed = feedService.selectedFeed();
+    if(! feed){ return; }
+    
+    //$log.log('showRead='+showRead);
+    var showRead = $scope.isRead;
+    if(!showRead){
+      showRead=0;
+    }
+    feedService.getFeedEntries(feed,showRead);
+  }
+
+  $scope.pressThis = function(entry,pt_url) {
+    //This is ripped from the pressthisbookmarklet
+    var encURI = window.encodeURIComponent,
+      target = '_press_this_app',
+      windowWidth, windowHeight, selection;
+    var href = entry.link;
+    if ( ! pt_url ) {
+      return;
+    }
+    pt_url+= '?v=8'
+
+    if ( href.match( /^https?:/ ) ) {
+      pt_url += '&u=' + encURI( href );
+      if ( href.match( /^https:/ ) && pt_url.match( /^http:/ ) ) {
+      }
+    } else {
+      top.location.href = pt_url; //TODO should this change to a window.open with settimeout?
+      return;
+    }
+
+    //if the user has selected any text, let's grab that
+    if ( window.getSelection ) {
+      selection = window.getSelection() + '';
+    } else if ( document.getSelection ) {
+      selection = document.getSelection() + '';
+    } else if ( document.selection ) {
+      selection = document.selection.createRange().text || '';
+    }
+
+    pt_url += '&buster=' + ( new Date().getTime() );
+
+      if ( entry.title ) {
+        pt_url += '&t=' + encURI( entry.title.substr( 0, 256 ) );
+      }
+
+      if ( selection ) {
+        pt_url += '&s=' + encURI( selection.substr( 0, 512 ) );
+      }
+
+    windowWidth  = window.outerWidth || document.documentElement.clientWidth || 600;
+    windowHeight = window.outerHeight || document.documentElement.clientHeight || 700;
+
+    windowWidth = ( windowWidth < 800 || windowWidth > 5000 ) ? 600 : ( windowWidth * 0.7 );
+    windowHeight = ( windowHeight < 800 || windowHeight > 3000 ) ? 700 : ( windowHeight * 0.9 );
+
+    window.open( pt_url, target, 'location,resizable,scrollbars,width=' + windowWidth + ',height=' + windowHeight );
+    return;
+
+  }
+
+  /*
+   * toggle the entry's read status
+   */
+  $scope.setReadStatus = function( entry, status){
+    feedService.setEntryReadStatus(entry,status);
+  }
+
+  /*
+   * call up the edit window for this feed
+   */
+  $scope.editFeed = function(feed){
+    $scope.$emit('feedEdit', {feed:feed});
+  }
+
+  /*
+   * Someone has clicked an entry.
+   * Toggle read on the server, then alert the UI
+   */
+
+  $scope.selectEntry = function (entry) {
+    //Set this as the selected entry
+    feedService.selectEntry(entry);
+    //$scope.selectedEntry = entry;
+    if( "0" == entry.isRead ){
+      $scope.setReadStatus(entry);
+    }
+  }
+  $scope.getFeedFromEntry = function (entry){
+    return feedService.getFeedFromEntry(entry);
+  }
+  $scope.displayFeed(null,$scope.isRead);
+  //$scope.displayFeed();
+  /*
+   * Catch the feedSelected event, display entries from that feed
+   */
+  $scope.$on('feedSelected',function(event,args){
+    //$log.log('feedSelected in Entries!');
+    //$scope.displayFeed(args['feed'], args['showRead']);
+  });
+  $scope.nextEntry = function(currentEntry){
+    //$log.info('next entry finds the entry after the current entry, selects it');
+    var index =0;//by default we select the first entry
+    var isLastEntry = false;
+    if( $scope.entries.length == 0){
+      return;//can't select anything
+    }
+    if(null != currentEntry){ //if there is a current entry, get the index after it
+      var index = $scope.entries.indexOf(currentEntry);
+      //If we are at the last entry just go to the bottom of it
+      isLastEntry = (index+1 == $scope.entries.length );
+      index = Math.min((index +1) , $scope.entries.length -1);
+    }
+    var next = $scope.entries[index];
+    $scope.selectEntry(next);
+    //if we are at the next to last entry, let's try to get more entries first
+    if((index + 2 ) >= $scope.entries.length){
+      //get more entries
+      $scope.addMoreEntries();
+    }
+    //scroll to the entry
+    scrollToEntry(next, isLastEntry);
+  };
+  $scope.previousEntry = function (currentEntry) {
+    //$log.info('prev entry finds the entry before the current entry, selects it');
+    var index = $scope.entries.length;//by default we select the last entry
+    if( $scope.entries.length == 0){
+      return;//can't select anything
+    }
+    if(null != currentEntry){ //if there is a current entry, get the index after it
+      index = $scope.entries.indexOf(currentEntry);
+      //If we are at the last entry just go to the first
+      index = Math.max((index -1),0) ;
+    }
+    var previous = $scope.entries[index];
+    $scope.selectEntry(previous);
+    //scroll to the entry
+    scrollToEntry(previous);
+  };
+
+  /* Set up keyboard shortcuts
+   */
+
+  //handle the down arrow keys and j to scroll the next item to top of scren
+  key('j,down',function(event,handler){
+    $scope.nextEntry($scope.selectedEntry);
+  });
+  //up and k should scroll the previous item to the top of the screen
+  key('k,up',function(event,handler){
+    $scope.previousEntry($scope.selectedEntry);
+  });
+  //o should open the original article
+  key('o',function(event,handler){
+    var entry = $scope.selectedEntry;
+    $log.log(entry);
+    //TODO get a canonical link - or maybe we should only store canonical links when we do inserts
+    if(entry){
+      window.open(entry.link);
+    }
+  });
+  //u should toggle the current item's read status
+  key('u',function(event,handler){
+    var entry = $scope.selectedEntry;
+    if(null == entry)
+      return;
+    $scope.setReadStatus(entry,"0");
+  });
+}
+
+/*
+ * Subscription control
+ * This should manage the workflow of adding or editing a feed
+ * Feed CRUD happens here.
+ *
+ * If you summon this with nothing in it, we'll show the feed search
+ * Give it a candidate and we'll hide the rest and let you edit this
+ * 
+ */
+function SubsCtrl($scope,$http,$log,feedService ){
+  //The normal status of this window is to be hidden.
+  $scope.reveal = false;
+  $scope.possibleFeeds = null;
+  $scope.urlCandidate = '';
+  $scope.feedCandidate = null;
+  $scope.newTags = '';
+  $scope.opmlFile=null;
+  $scope.files = null;
+  $scope.fileSize = null;
+  $scope.close = function(){
+    $scope.reveal = false;
+    $scope.clear();
+  }
+  $scope.toggle = function(){
+    $scope.reveal = !$scope.reveal;
+    $scope.clear();
+  }
+
+  $scope.clear = function() {
+    $scope.possibleFeeds = null;
+    $scope.urlCandidate = '';
+    $scope.feedCandidate = null;
+    $scope.feedsCount = '';
+    $scope.doneFeeds = '';
+    $scope.isLoading = false;
+    $scope.newTags = '';
+    //TODO clear any OPML elements
+  }
+
+  $scope.checkUrl = function(url){
+    if(url){
+      $scope.urlCandidate = url;
+    }
+    $scope.isLoading=true;
+    feedService.checkUrl($scope.urlCandidate,function(response){
+      $scope.isLoading = false;
+      if("feed" == response.url_type){
+        //console.log('found a feed!');
+        //if it returns a feed detail, display that.
+        $scope.feedCandidate = { 
+          feed_url: response.orig_url, 
+          site_url: response.site_url, 
+          feed_id: null, 
+          feed_name: response.feed_name,
+          unread_count:0,
+          private:false
+        };
+        $scope.possibleFeeds=null;
+      }
+      else{
+        //console.log('sticking in feed names');
+        _.each(response.feeds,function(feed){
+          //console.log('looking for a title for '+ feed);
+          //console.log(feed);
+          if(feed.body){
+            //TODO this all seeems a bit fragile. Could be done better
+            var xml = jQuery.parseXML(feed.body);
+            xml = jQuery(xml);
+            var title = xml.find('channel > title');
+            feed.name = title.text();
+            //console.log(feed.name);
+          }
+        });
+        //if it returns possibleFeeds, display them.
+        $scope.possibleFeeds = response.feeds;
+
+        //remove the old feedCandidate if there is one
+        $scope.feedCandidate = null;
+      }
+    });
+  }
+  /*
+   * Remove a tag from a feedCandidate
+   */
+  $scope.removeTag = function(tag){
+    currenttags = _.chain(String.split($scope.feedCandidate.tags,',' ))
+                   .map(function(item){return item.trim();})
+                   .unique()
+                   .compact()
+                   .value();
+    $scope.feedCandidate.tags = _.reject(currenttags,function(item){return item==tag}).join(',');
+  }
+  $scope.availableTags = [];
+  $scope.$watch(feedService.allTags,function(newValue){
+    $scope.availableTags = newValue});
+  /*
+   * We are using wp's tags scripts, but we need them to be done in an angularJS context:
+   */
+ // jQuery('#tagentry').suggest(opts.ajaxurl + '?action=orbital_get_tags',{ delay: 500, minchars: 2, multiple: true, multipleSep: ', ', onSelect:function(){$scope.$apply()} });
+  
+  /*
+   * save changes or additions in a feed back to storage
+   */
+  $scope.saveFeed = function(feed, batchmode){
+    //mark the save button busy
+    if(! batchmode) {$scope.isLoading = true;}
+    feedService.saveFeed(feed,function(response,data){
+        if(! batchmode){
+          //mark the save button not busy
+          $scope.isLoading = false;
+          //hide the feed away
+          $scope.toggle();
+          $scope.feedSaved(response);
+          $scope.feedsChanged();
+        }
+
+    });
+  }
+  /*
+   * Unsubscribe from a feed. 
+   *
+   */
+  $scope.unsubscribe = function(feed){
+    //TODO it would be good to give a cancel
+    //Maybe it could just be to call the save again
+    $scope.isLoading = true;
+    $log.info(feed);
+    feedService.unsubscribe(feed, function (response){
+      //unmark the busy 
+      $scope.isLoading = false;
+      //close the dialogue
+      $scope.close();
+      $scope.feedsChanged();
+    });
+  }
+  $scope.getFile = function(){
+
+    var file = document.getElementById('import-opml').files[0];
+    $scope.opmlFile = file;
+    return file;
+  }
+
+  /*
+   * When an opml file is selected, read the size and name out
+   */
+  $scope.fileSelected = function(){
+    // Check for the various File API support.
+    if (window.File && window.FileReader && window.FileList && window.Blob) {
+      // Great success! All the File APIs are supported.
+      var file = $scope.getFile();
+      $scope.fileSize = 0;
+      if(file.size > 1024 * 1024){
+        $scope.fileSize = (Math.round(file.size * 100 / (1024 * 1024)) / 100).toString() + 'MB';
+      }
+      else{
+        $scope.fileSize = (Math.round(file.size * 100 / 1024) / 100).toString() + 'KB';
+      }
+      var reader = new FileReader();
+      //reader.onprogress = updateProgress;
+      reader.onload = (function (theFile){
+        return function (e){
+          //parse the opml and upload it
+          //console.log(e.target.result);
+          $scope.$apply(function(){
+            $scope.isLoading = true;
+            $scope.parseOPML(e.target.result);
+            $scope.isLoading = false;
+          });
+
+        };
+      })(file);
+      reader.readAsText(file);
+    } else {
+      //TODO better error telling you specific versions of FF, Chrome, IE to use
+      alert('Unfortunately, this browser is a bit busted.  File reading will not work, and I have not written a different way to upload opml.  Try using the latest firefox or chrome');
+    }
+  }
+
+  /*
+   * We createa  parseXML function dependend on the browser
+   */
+  $scope.parseXML = function(xmlStr){ }
+  if (typeof window.DOMParser != "undefined") {
+    $scope.parseXML = function(xmlStr) {
+      return ( new window.DOMParser() ).parseFromString(xmlStr, "text/xml");
+    };
+  } else if (typeof window.ActiveXObject != "undefined" &&
+            new window.ActiveXObject("Microsoft.XMLDOM")) {
+    $scope.parseXML = function(xmlStr) {
+      var xmlDoc = new window.ActiveXObject("Microsoft.XMLDOM");
+      xmlDoc.async = "false";
+      xmlDoc.loadXML(xmlStr);
+      return xmlDoc;
+    };
+  }
+
+  /*
+   * This function takes in an OPML document and pushes feeds into the feedCandidates array
+   * or it throws an informative error
+   */
+  $scope.parseOPML = function(opml) {
+    $scope.feedCandidates = [];
+    var doc = $scope.parseXML(opml);
+    var outlines = doc.querySelectorAll('outline[xmlUrl]');
+    $scope.feedsCount = outlines.length;
+    $scope.doneFeeds = 0;
+    for(index=0;index<outlines.length;index++){
+      var node = outlines.item(index);
+      var feed = {};
+      feed.feed_id = null;
+      feed.is_private = false;
+      feed.feed_name = node.getAttribute('text');
+      feed.feed_url = node.getAttribute('xmlUrl');
+      feed.site_url = node.getAttribute('htmlUrl');
+      /*
+       * TODO: a category can also be provided by nesting feed nodes within
+       * a text node. The title or text attribute should be the category then.
+       * Right now we don't support that.
+       */
+      feed.tags ="";
+      if(node.hasAttribute('category')){
+        feed.tags += node.getAttribute('category');
+      }
+      pnode = node.parentNode;
+      if(pnode.tagName != "body"){
+        //AHA! you are nested, aren't you?
+        //Give up your secrets you potential folder/tag
+        if(pnode.hasAttribute('text')){
+          feed.tags += pnode.getAttribute('text');
+        }
+        else if(pnode.hasAttribute('title')){
+          feed.tags += pnode.getAttribute('title');
+        }
+
+      }
+      $scope.doneFeeds = $scope.feedCandidates.push(feed);
+    }
+  }
+  /*
+   * Remove a candidate from the list of feedCandidates
+   */
+  $scope.removeCandidate = function(feed){
+    $scope.feedCandidates = _.without($scope.feedCandidates, feed);
+  }
+
+  /*
+   * Feeds have previously been parsed out of the opml file
+   * This function saves those feed candidates to the server.
+   * save that feed back up to the server.
+   * TODO It would be even better to hand this off to a web worker if supported
+   */
+  $scope.uploadOPML = function(){
+    $log.info('uploading OPML');
+    $scope.isLoading=true;
+    _.each($scope.feedCandidates, function(feed, index, list){
+      $scope.doneFeeds=0;
+      $scope.saveFeed(feed,true);
+      $scope.doneFeeds++;
+    });
+    $scope.isLoading=false;
+    $scope.feedsChanged();
+    $scope.close();;
+    return false;
+  }
+
+  /* events */
+
+  //this window has been requested or dismissed
+  $scope.$on('subscriptionsWindow',function(event,args){
+    $log.info('subscriptionsWindow');
+    //$log.info(event);
+    $scope.toggle();
+  });
+
+  $scope.feedSaved = function(feed){
+    $scope.$emit('feedSaved',{feed:feed});
+  }
+
+  $scope.feedsChanged = function(){
+    feedService.refresh();
+  }
+
+  $scope.editFeed = function(feed){
+    $scope.reveal = true;
+    $scope.feedCandidate = feed;
+  }
+
+  //We are going to edit a feed
+  //it becomes the feedCandidate so we can edit it there.
+  //TODO we should copy the feed, not use the one in the feedlist
+  $scope.$on('feedEditRequest', function(event,args){
+    $scope.editFeed(args.feed);
+  });
+}
+
+
+function changeSortOrder( newSort){
+  scope = angular.element('#orbital-main-content').scope();
+  scope.$apply(function(){
+    scope.changeSortOrder( newSort);
+  });
+}
+
+function markFeedRead(feed){
+  scope = angular.element('#orbital-feedlist').scope();
+  scope.$apply(function(){
+    scope.markRead( feed);
+  });
+}
+function showRead(feed){
+  scope=angular.element('#orbital-feedlist').scope();
+  scope.$apply(function(){
+    scope.showReadItems( feed);
+  });
+}
+function updateFeed(feed){
+  scope = angular.element('#orbital-feedlist').scope();
+  scope.$apply(function(){
+    scope.update( feed);
+  });
+}
